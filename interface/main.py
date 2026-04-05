@@ -30,14 +30,14 @@ from services.vision_inventory_service import (
     listar_referencias_visuais,
     salvar_modelo_visual_estoque,
 )
-PAGINAS = [
-    'Início',
-    'Painel Operacional',
-    'Importar Dados',
-    'Inteligência',
-    'Estoque',
-    'Configurações',
-]
+PAGINAS = {
+    'inicio': 'Início',
+    'painel_operacional': 'Painel Operacional',
+    'importar_dados': 'Importar Dados',
+    'inteligencia': 'Inteligência',
+    'estoque': 'Estoque',
+    'configuracoes': 'Configurações',
+}
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / 'assets'
 DOJO_LOGO = ASSETS_DIR / 'dojo.png'
@@ -436,22 +436,32 @@ def run_app():
     st.sidebar.markdown(f"**{brand['display_name']}**")
     st.sidebar.caption(brand['subtitle'])
     st.sidebar.divider()
-    pagina = st.sidebar.radio('Navegação', PAGINAS, key='pagina_mestre_ia')
+    pagina_padrao = 'inicio'
+    pagina_atual = st.session_state.get('pagina_mestre_ia', pagina_padrao)
+    if pagina_atual not in PAGINAS:
+        st.session_state['pagina_mestre_ia'] = pagina_padrao
+        pagina_atual = pagina_padrao
+    pagina = st.sidebar.radio(
+        'Navegação',
+        list(PAGINAS.keys()),
+        key='pagina_mestre_ia',
+        format_func=lambda item: PAGINAS[item],
+    )
     st.sidebar.divider()
     st.sidebar.write(f'Unidade ativa: {empresa_selecionada}')
     st.sidebar.caption('Dados, IA e operação trabalham no mesmo fluxo com leitura centralizada do ChefWeb.')
 
-    if pagina == 'Início':
+    if pagina == 'inicio':
         render_home(empresa_selecionada)
-    elif pagina == 'Painel Operacional':
+    elif pagina == 'painel_operacional':
         render_dashboard(empresa_selecionada)
-    elif pagina == 'Importar Dados':
+    elif pagina == 'importar_dados':
         render_importar_dados(empresa_selecionada)
-    elif pagina == 'Inteligência':
+    elif pagina == 'inteligencia':
         render_ia(empresa_selecionada)
-    elif pagina == 'Estoque':
+    elif pagina == 'estoque':
         render_estoque(empresa_selecionada)
-    elif pagina == 'Configurações':
+    elif pagina == 'configuracoes':
         render_configuracoes(empresa_selecionada)
 
 
