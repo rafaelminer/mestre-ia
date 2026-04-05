@@ -1,0 +1,25 @@
+version: '3.9'
+services:
+  streamlit:
+    build: .
+    container_name: dojo_os_streamlit
+    ports:
+      - '8501:8501'
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DOJO_DB_PATH=/app/data/dojo_os.db
+    command: ["streamlit", "run", "app.py", "--server.port", "8501", "--server.address", "0.0.0.0"]
+
+  api:
+    build: .
+    container_name: dojo_os_api
+    ports:
+      - '8000:8000'
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DOJO_DB_PATH=/app/data/dojo_os.db
+    command: ["uvicorn", "interface.api:app", "--host", "0.0.0.0", "--port", "8000"]

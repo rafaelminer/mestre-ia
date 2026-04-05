@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: mestre-ia
+    runtime: docker
+    plan: free
+    autoDeploy: true
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: DOJO_DB_PATH
+        value: /data/dojo_os.db
+    disk:
+      name: mestre-ia-data
+      mountPath: /data
+      sizeGB: 1
