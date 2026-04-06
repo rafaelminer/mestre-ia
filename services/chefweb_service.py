@@ -54,16 +54,19 @@ def _read_excel(path: Path) -> pd.DataFrame:
     if raw[:200].lstrip()[:1] in (b"<", b"\xef") or b"<html" in raw[:512].lower() or b"<HTML" in raw[:512]:
         for encoding in ["utf-8", "utf-8-sig", "latin-1"]:
             try:
-                # header=0 usa primeira linha como cabeçalho; skiprows tenta ignorar linhas de título
+                # Tenta header=1 primeiro (pula linha de título do ChefWeb)
+                tables = pd.read_html(path, encoding=encoding, flavor="lxml", header=1)
+                if tables and tables[0].shape[0] > 0:
+                    return tables[0]
+            except ImportError:
+                break
+            except Exception:
+                pass
+        for encoding in ["utf-8", "utf-8-sig", "latin-1"]:
+            try:
                 tables = pd.read_html(path, encoding=encoding, flavor="lxml", header=0)
                 if tables:
-                    df = tables[0]
-                    # Se a primeira linha parece um cabeçalho repetido, tenta com skiprows=1
-                    if df.shape[0] > 1 and str(df.iloc[0, 0]).strip().lower() == str(df.columns[0]).strip().lower():
-                        tables2 = pd.read_html(path, encoding=encoding, flavor="lxml", header=0, skiprows=1)
-                        if tables2:
-                            df = tables2[0]
-                    return df
+                    return tables[0]
             except ImportError:
                 break
             except Exception as exc:
@@ -71,7 +74,14 @@ def _read_excel(path: Path) -> pd.DataFrame:
         # fallback sem lxml
         for encoding in ["utf-8", "utf-8-sig", "latin-1"]:
             try:
-                tables = pd.read_html(path, encoding=encoding, header=0)
+                tables = pd.read_html(path, encoding=encoding, header=1)
+                if tables and tables[0].shape[0] > 0:
+                    return tables[0]
+            except Exception:
+                pass
+        for encoding in ["utf-8", "utf-8-sig", "latin-1"]:
+            try:
+                tables = pd.read_html(path, encoding=encoding)
                 if tables:
                     return tables[0]
             except Exception as exc:
@@ -168,9 +178,9 @@ def normalize_sales_data(df: pd.DataFrame, empresa: str) -> pd.DataFrame:
     clean_df = clean_df.dropna(how="all")
     clean_df.columns = [str(col) for col in clean_df.columns]
 
-    item_col = _find_first_column(clean_df.columns.tolist(), ["item", "produto", "descricao", "descri", "prato", "sku", "nome", "mercadoria", "desc"])
+    item_col = _find_first_column(clean_df.columns.tolist(), ["item", "produto", "descricao", "descri", "prato", "sku", "nome", "mercadoria", "desc", "category"])
     quantity_col = _find_first_column(clean_df.columns.tolist(), ["quantidade", "qtd", "qtde", "itens", "volume", "qt", "qnt", "quant"])
-    total_col = _find_first_column(clean_df.columns.tolist(), ["total", "faturamento", "valor_total", "receita", "venda", "valor", "preco", "preco_total", "subtotal", "fat"])
+    total_col = _find_first_column(clean_df.columns.tolist(), ["total", "faturamento", "valor_total", "receita", "venda", "valor", "preco", "preco_total", "subtotal", "fat", "object_object"])
     pedidos_col = _find_first_column(clean_df.columns.tolist(), ["pedidos", "pedido", "orders", "num_pedido", "n_pedido", "comanda"])
     categoria_col = _find_first_column(clean_df.columns.tolist(), ["categoria", "grupo", "familia", "setor", "tipo", "class"])
 
