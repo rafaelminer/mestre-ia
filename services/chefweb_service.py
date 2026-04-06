@@ -46,39 +46,42 @@ def _read_csv(path: Path) -> pd.DataFrame:
 
 
 def _read_excel(path: Path) -> pd.DataFrame:
-    import logging
-    logging.info(f"Tentando ler arquivo Excel: {path}")
     errors = []
+    raw = path.read_bytes()
 
-    # Try openpyxl first for all Excel files
+    # ChefWeb exports HTML files with .xls extension — detect and handle
+    if raw[:200].lstrip()[:1] in (b"<", b"\xef") or b"<html" in raw[:512].lower() or b"<HTML" in raw[:512]:
+        for encoding in ["utf-8", "utf-8-sig", "latin-1"]:
+            try:
+                tables = pd.read_html(path, encoding=encoding, flavor="lxml")
+                if tables:
+                    return tables[0]
+            except ImportError:
+                break
+            except Exception as exc:
+                errors.append(f"html({encoding}): {exc}")
+        # fallback sem lxml
+        for encoding in ["utf-8", "utf-8-sig", "latin-1"]:
+            try:
+                tables = pd.read_html(path, encoding=encoding)
+                if tables:
+                    return tables[0]
+            except Exception as exc:
+                errors.append(f"html_fallback({encoding}): {exc}")
+
+    # Try openpyxl (real .xlsx)
     try:
-        logging.info("Tentando com openpyxl...")
-        result = pd.read_excel(path, engine="openpyxl")
-        logging.info("Sucesso com openpyxl")
-        return result
-    except ImportError as exc:
-        errors.append(f"openpyxl: dependencia ausente ({exc})")
-        logging.warning(f"Erro openpyxl ImportError: {exc}")
+        return pd.read_excel(path, engine="openpyxl")
     except Exception as exc:
         errors.append(f"openpyxl: {exc}")
-        logging.warning(f"Erro openpyxl: {exc}")
 
-    # If openpyxl failed, try xlrd
+    # Try xlrd (real .xls binary)
     try:
-        logging.info("Tentando com xlrd...")
-        result = pd.read_excel(path, engine="xlrd")
-        logging.info("Sucesso com xlrd")
-        return result
-    except ImportError as exc:
-        errors.append(f"xlrd: dependencia ausente ({exc})")
-        logging.warning(f"Erro xlrd ImportError: {exc}")
+        return pd.read_excel(path, engine="xlrd")
     except Exception as exc:
         errors.append(f"xlrd: {exc}")
-        logging.warning(f"Erro xlrd: {exc}")
 
-    error_msg = f"Não foi possível ler o Excel enviado após tentar openpyxl e xlrd. Tentativas: {' | '.join(errors)}"
-    logging.error(error_msg)
-    raise ValueError(error_msg)
+    raise ValueError(f"Não foi possível ler o arquivo enviado. Tentativas: {' | '.join(errors)}")
 
 
 def _extract_pdf_text(path: Path) -> str:
