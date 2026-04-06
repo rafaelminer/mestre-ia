@@ -232,10 +232,12 @@ def process_chefweb_upload(uploaded_file, empresa: str) -> Dict:
     if suffix == ".csv":
         file_type = "csv"
         preview = _read_csv(saved_path)
+        warnings.append(f"Colunas detectadas: {list(preview.columns)}")
         normalized = normalize_sales_data(preview, empresa)
     elif suffix in [".xlsx", ".xls"]:
         file_type = "excel"
         preview = _read_excel(saved_path)
+        warnings.append(f"Colunas detectadas: {list(preview.columns)}")
         normalized = normalize_sales_data(preview, empresa)
     elif suffix == ".pdf":
         file_type = "pdf"
