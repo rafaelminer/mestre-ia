@@ -52,10 +52,12 @@ def _read_excel(path: Path) -> pd.DataFrame:
 
     # ChefWeb exports HTML files with .xls extension — detect and handle
     if raw[:200].lstrip()[:1] in (b"<", b"\xef") or b"<html" in raw[:512].lower() or b"<HTML" in raw[:512]:
+        # thousands='.' e decimal=',' para formato brasileiro (3.888,41 -> 3888.41)
+        read_kwargs = dict(thousands=".", decimal=",")
         for encoding in ["utf-8", "utf-8-sig", "latin-1"]:
             try:
                 # Tenta header=1 primeiro (pula linha de título do ChefWeb)
-                tables = pd.read_html(path, encoding=encoding, flavor="lxml", header=1)
+                tables = pd.read_html(path, encoding=encoding, flavor="lxml", header=1, **read_kwargs)
                 if tables and tables[0].shape[0] > 0:
                     return tables[0]
             except ImportError:
@@ -64,7 +66,7 @@ def _read_excel(path: Path) -> pd.DataFrame:
                 pass
         for encoding in ["utf-8", "utf-8-sig", "latin-1"]:
             try:
-                tables = pd.read_html(path, encoding=encoding, flavor="lxml", header=0)
+                tables = pd.read_html(path, encoding=encoding, flavor="lxml", header=0, **read_kwargs)
                 if tables:
                     return tables[0]
             except ImportError:
@@ -74,7 +76,7 @@ def _read_excel(path: Path) -> pd.DataFrame:
         # fallback sem lxml
         for encoding in ["utf-8", "utf-8-sig", "latin-1"]:
             try:
-                tables = pd.read_html(path, encoding=encoding, header=1)
+                tables = pd.read_html(path, encoding=encoding, header=1, **read_kwargs)
                 if tables and tables[0].shape[0] > 0:
                     return tables[0]
             except Exception:
@@ -152,6 +154,19 @@ def _find_first_column(columns: List[str], aliases: List[str]) -> Optional[str]:
     return None
 
 
+def _parse_br_number(series: pd.Series) -> pd.Series:
+    """Converte números em formato brasileiro (1.234,56) para float."""
+    if hasattr(series, 'dtype') and series.dtype.kind in ('f', 'i'):
+        return pd.to_numeric(series, errors='coerce')
+    converted = (
+        series.astype(str).str.strip()
+        .str.replace(r'\s', '', regex=True)
+        .str.replace('.', '', regex=False)
+        .str.replace(',', '.', regex=False)
+    )
+    return pd.to_numeric(converted, errors='coerce')
+
+
 def _col_looks_like_dates(series: pd.Series) -> bool:
     """Retorna True se a maioria dos valores parecem datas (ex: 01-03, 2026-03-01)."""
     sample = series.dropna().astype(str).head(10)
@@ -215,9 +230,9 @@ def normalize_sales_data(df: pd.DataFrame, empresa: str) -> pd.DataFrame:
     normalized["data"] = _build_datetime_series(clean_df)
     normalized["item"] = clean_df[item_col].astype(str).str.strip() if item_col else "ChefWeb"
     normalized["categoria"] = clean_df[categoria_col].astype(str).str.strip() if categoria_col else "Geral"
-    normalized["quantidade"] = pd.to_numeric(clean_df[quantity_col], errors="coerce") if quantity_col else 1
-    normalized["total"] = pd.to_numeric(clean_df[total_col], errors="coerce") if total_col else 0.0
-    normalized["pedidos"] = pd.to_numeric(clean_df[pedidos_col], errors="coerce") if pedidos_col else normalized["quantidade"]
+    normalized["quantidade"] = _parse_br_number(clean_df[quantity_col]) if quantity_col else 1
+    normalized["total"] = _parse_br_number(clean_df[total_col]) if total_col else 0.0
+    normalized["pedidos"] = _parse_br_number(clean_df[pedidos_col]) if pedidos_col else normalized["quantidade"]
 
     normalized["quantidade"] = normalized["quantidade"].fillna(1).clip(lower=0)
     normalized["pedidos"] = normalized["pedidos"].fillna(normalized["quantidade"]).clip(lower=0)
