@@ -1,5 +1,6 @@
 import json
 import re
+import unicodedata
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -53,9 +54,16 @@ def _read_excel(path: Path) -> pd.DataFrame:
     if raw[:200].lstrip()[:1] in (b"<", b"\xef") or b"<html" in raw[:512].lower() or b"<HTML" in raw[:512]:
         for encoding in ["utf-8", "utf-8-sig", "latin-1"]:
             try:
-                tables = pd.read_html(path, encoding=encoding, flavor="lxml")
+                # header=0 usa primeira linha como cabeçalho; skiprows tenta ignorar linhas de título
+                tables = pd.read_html(path, encoding=encoding, flavor="lxml", header=0)
                 if tables:
-                    return tables[0]
+                    df = tables[0]
+                    # Se a primeira linha parece um cabeçalho repetido, tenta com skiprows=1
+                    if df.shape[0] > 1 and str(df.iloc[0, 0]).strip().lower() == str(df.columns[0]).strip().lower():
+                        tables2 = pd.read_html(path, encoding=encoding, flavor="lxml", header=0, skiprows=1)
+                        if tables2:
+                            df = tables2[0]
+                    return df
             except ImportError:
                 break
             except Exception as exc:
@@ -63,7 +71,7 @@ def _read_excel(path: Path) -> pd.DataFrame:
         # fallback sem lxml
         for encoding in ["utf-8", "utf-8-sig", "latin-1"]:
             try:
-                tables = pd.read_html(path, encoding=encoding)
+                tables = pd.read_html(path, encoding=encoding, header=0)
                 if tables:
                     return tables[0]
             except Exception as exc:
@@ -110,10 +118,17 @@ def _extract_pdf_text(path: Path) -> str:
     return ""
 
 
+def _strip_accents(text: str) -> str:
+    return "".join(
+        c for c in unicodedata.normalize("NFD", text)
+        if unicodedata.category(c) != "Mn"
+    )
+
+
 def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     renamed = {}
     for col in df.columns:
-        normalized = str(col).strip().lower()
+        normalized = _strip_accents(str(col).strip().lower())
         normalized = re.sub(r"[^a-z0-9]+", "_", normalized)
         renamed[col] = normalized.strip("_")
     return df.rename(columns=renamed)
@@ -153,11 +168,11 @@ def normalize_sales_data(df: pd.DataFrame, empresa: str) -> pd.DataFrame:
     clean_df = clean_df.dropna(how="all")
     clean_df.columns = [str(col) for col in clean_df.columns]
 
-    item_col = _find_first_column(clean_df.columns.tolist(), ["item", "produto", "descricao", "prato", "sku"])
-    quantity_col = _find_first_column(clean_df.columns.tolist(), ["quantidade", "qtd", "qtde", "itens", "volume"])
-    total_col = _find_first_column(clean_df.columns.tolist(), ["total", "faturamento", "valor_total", "receita", "venda", "valor"])
-    pedidos_col = _find_first_column(clean_df.columns.tolist(), ["pedidos", "pedido", "orders"])
-    categoria_col = _find_first_column(clean_df.columns.tolist(), ["categoria", "grupo", "familia", "setor"])
+    item_col = _find_first_column(clean_df.columns.tolist(), ["item", "produto", "descricao", "descri", "prato", "sku", "nome", "mercadoria", "desc"])
+    quantity_col = _find_first_column(clean_df.columns.tolist(), ["quantidade", "qtd", "qtde", "itens", "volume", "qt", "qnt", "quant"])
+    total_col = _find_first_column(clean_df.columns.tolist(), ["total", "faturamento", "valor_total", "receita", "venda", "valor", "preco", "preco_total", "subtotal", "fat"])
+    pedidos_col = _find_first_column(clean_df.columns.tolist(), ["pedidos", "pedido", "orders", "num_pedido", "n_pedido", "comanda"])
+    categoria_col = _find_first_column(clean_df.columns.tolist(), ["categoria", "grupo", "familia", "setor", "tipo", "class"])
 
     normalized = pd.DataFrame(index=clean_df.index)
     normalized["empresa"] = [empresa] * len(clean_df)
