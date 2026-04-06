@@ -731,55 +731,69 @@ def render_importar_dados(empresa):
         'Envie relatórios em CSV, Excel, PDF ou imagem para leitura automática, consolidação no banco e análise por IA.',
     )
 
-    uploaded = st.file_uploader(
-        'Carregar arquivo do ChefWeb',
+    uploaded_files = st.file_uploader(
+        'Carregar arquivos do ChefWeb',
         type=['csv', 'xlsx', 'xls', 'pdf', 'png', 'jpg', 'jpeg'],
         help='Arquivos são salvos automaticamente em data/uploads/.',
+        accept_multiple_files=True,
     )
     processar = st.button('Processar arquivo', type='primary')
 
-    if processar and uploaded is None:
-        st.error('Selecione um arquivo antes de iniciar o processamento.')
+    if processar and not uploaded_files:
+        st.error('Selecione ao menos um arquivo antes de iniciar o processamento.')
 
-    if processar and uploaded is not None:
-        with st.spinner('Processando arquivo e integrando dados ao Mestre IA...'):
-            try:
-                resultado = process_chefweb_upload(uploaded, empresa)
-                info(f"Arquivo ChefWeb processado: {resultado['filename']}", empresa)
-                st.success(f"Importação concluída com {resultado['imported_rows']} linha(s) integradas.")
+    if processar and uploaded_files:
+        total_rows = 0
+        total_faturamento = 0.0
+        total_pedidos = 0
 
-                m1, m2, m3 = st.columns(3)
-                m1.metric('Linhas importadas', resultado['imported_rows'])
-                m2.metric('Faturamento importado', f"R$ {resultado['imported_total']:.2f}")
-                m3.metric('Pedidos identificados', resultado['pedidos_total'])
+        for uploaded in uploaded_files:
+            with st.spinner(f'Processando {uploaded.name}...'):
+                try:
+                    resultado = process_chefweb_upload(uploaded, empresa)
+                    info(f"Arquivo ChefWeb processado: {resultado['filename']}", empresa)
+                    total_rows += resultado['imported_rows']
+                    total_faturamento += resultado['imported_total']
+                    total_pedidos += resultado['pedidos_total']
 
-                analise_upload = registrar_analise_operacional(empresa)
-                if analise_upload.get('insights'):
-                    st.subheader('Insights gerados após a importação')
-                    for insight in analise_upload['insights']:
-                        st.write(f'- {insight}')
-                if analise_upload.get('recomendacoes'):
-                    st.caption('Recomendações da IA')
-                    for recomendacao in analise_upload['recomendacoes']:
-                        st.write(f'- {recomendacao}')
+                    st.success(f"**{uploaded.name}** — {resultado['imported_rows']} linha(s) integradas.")
 
-                for aviso in resultado.get('warnings', []):
-                    st.warning(aviso)
+                    for aviso in resultado.get('warnings', []):
+                        st.warning(aviso)
 
-                if isinstance(resultado.get('preview'), pd.DataFrame) and not resultado['preview'].empty:
-                    st.subheader('Prévia original do arquivo')
-                    st.dataframe(resultado['preview'], use_container_width=True)
+                    if isinstance(resultado.get('preview'), pd.DataFrame) and not resultado['preview'].empty:
+                        with st.expander(f'Prévia: {uploaded.name}'):
+                            st.dataframe(resultado['preview'], use_container_width=True)
 
-                if isinstance(resultado.get('normalized_preview'), pd.DataFrame) and not resultado['normalized_preview'].empty:
-                    st.subheader('Dados normalizados para o sistema')
-                    st.dataframe(resultado['normalized_preview'], use_container_width=True)
+                    if isinstance(resultado.get('normalized_preview'), pd.DataFrame) and not resultado['normalized_preview'].empty:
+                        with st.expander(f'Dados normalizados: {uploaded.name}'):
+                            st.dataframe(resultado['normalized_preview'], use_container_width=True)
 
-                if resultado.get('text_preview'):
-                    st.subheader('Texto extraído do PDF')
-                    st.text_area('Conteúdo identificado', value=resultado['text_preview'], height=220)
-            except Exception as exc:
-                error(f'Erro ao processar upload ChefWeb: {exc}', empresa)
-                st.error(f'Erro ao processar arquivo: {exc}')
+                    if resultado.get('text_preview'):
+                        with st.expander(f'Texto extraído: {uploaded.name}'):
+                            st.text_area('Conteúdo identificado', value=resultado['text_preview'], height=220, key=f'text_{uploaded.name}')
+
+                except Exception as exc:
+                    error(f'Erro ao processar upload ChefWeb: {exc}', empresa)
+                    st.error(f'Erro ao processar **{uploaded.name}**: {exc}')
+
+        if len(uploaded_files) > 1:
+            st.divider()
+            st.subheader('Resumo da importação')
+            m1, m2, m3 = st.columns(3)
+            m1.metric('Total de linhas importadas', total_rows)
+            m2.metric('Faturamento total importado', f'R$ {total_faturamento:.2f}')
+            m3.metric('Total de pedidos', total_pedidos)
+
+        analise_upload = registrar_analise_operacional(empresa)
+        if analise_upload.get('insights'):
+            st.subheader('Insights gerados após a importação')
+            for insight in analise_upload['insights']:
+                st.write(f'- {insight}')
+        if analise_upload.get('recomendacoes'):
+            st.caption('Recomendações da IA')
+            for recomendacao in analise_upload['recomendacoes']:
+                st.write(f'- {recomendacao}')
 
     render_divider()
     col1, col2 = st.columns(2)
