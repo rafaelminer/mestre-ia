@@ -152,9 +152,23 @@ def _find_first_column(columns: List[str], aliases: List[str]) -> Optional[str]:
     return None
 
 
+def _col_looks_like_dates(series: pd.Series) -> bool:
+    """Retorna True se a maioria dos valores parecem datas (ex: 01-03, 2026-03-01)."""
+    sample = series.dropna().astype(str).head(10)
+    if sample.empty:
+        return False
+    parsed = pd.to_datetime(sample, errors="coerce", dayfirst=True)
+    return parsed.notna().sum() >= max(1, len(sample) * 0.6)
+
+
 def _build_datetime_series(df: pd.DataFrame) -> pd.Series:
     columns = list(df.columns)
     date_col = _find_first_column(columns, ["data", "date", "dia", "movimento", "datetime"])
+    # Se nao achou coluna de data por nome, tenta category (evoluo-de-vendas tem datas em category)
+    if not date_col:
+        cat_col = _find_first_column(columns, ["category"])
+        if cat_col and _col_looks_like_dates(df[cat_col]):
+            date_col = cat_col
     hour_col = _find_first_column(columns, ["hora", "horario", "time"])
     if date_col and hour_col and date_col != hour_col:
         combined = (
@@ -178,11 +192,23 @@ def normalize_sales_data(df: pd.DataFrame, empresa: str) -> pd.DataFrame:
     clean_df = clean_df.dropna(how="all")
     clean_df.columns = [str(col) for col in clean_df.columns]
 
-    item_col = _find_first_column(clean_df.columns.tolist(), ["item", "produto", "descricao", "descri", "prato", "sku", "nome", "mercadoria", "desc", "category"])
-    quantity_col = _find_first_column(clean_df.columns.tolist(), ["quantidade", "qtd", "qtde", "itens", "volume", "qt", "qnt", "quant"])
-    total_col = _find_first_column(clean_df.columns.tolist(), ["total", "faturamento", "valor_total", "receita", "venda", "valor", "preco", "preco_total", "subtotal", "fat", "object_object"])
-    pedidos_col = _find_first_column(clean_df.columns.tolist(), ["pedidos", "pedido", "orders", "num_pedido", "n_pedido", "comanda"])
-    categoria_col = _find_first_column(clean_df.columns.tolist(), ["categoria", "grupo", "familia", "setor", "tipo", "class"])
+    cols = clean_df.columns.tolist()
+    item_col = _find_first_column(cols, ["item", "produto", "descricao", "descri", "prato", "sku", "nome", "mercadoria", "desc", "category"])
+    quantity_col = _find_first_column(cols, ["quantidade", "qtd", "qtde", "itens_vendidos", "itens", "volume", "qt", "qnt", "quant"])
+    total_col = _find_first_column(cols, ["total", "faturamento", "valor_total", "receita", "venda", "valor", "preco", "preco_total", "subtotal", "fat", "object_object"])
+    pedidos_col = _find_first_column(cols, ["pedidos", "pedido", "orders", "num_pedido", "n_pedido", "comanda", "no_de_cupons", "n_de_cupons", "cupons", "volume_por_atendimento"])
+    categoria_col = _find_first_column(cols, ["categoria", "grupo", "familia", "setor", "tipo", "class"])
+
+    # Se item_col contem datas (ex: evoluo-de-vendas), nao usar como item
+    if item_col and _col_looks_like_dates(clean_df[item_col]):
+        item_col = None
+
+    # Fallback: se nao achou total, usa a ultima coluna numerica nao mapeada
+    if total_col is None:
+        used = {c for c in [item_col, quantity_col, pedidos_col, categoria_col] if c}
+        numeric_cols = [c for c in clean_df.select_dtypes(include="number").columns if c not in used]
+        if numeric_cols:
+            total_col = numeric_cols[-1]
 
     normalized = pd.DataFrame(index=clean_df.index)
     normalized["empresa"] = [empresa] * len(clean_df)
