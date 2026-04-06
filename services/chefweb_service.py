@@ -1,5 +1,6 @@
 import json
 import re
+import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -45,7 +46,39 @@ def _read_csv(path: Path) -> pd.DataFrame:
 
 
 def _read_excel(path: Path) -> pd.DataFrame:
-    return pd.read_excel(path)
+    import logging
+    logging.info(f"Tentando ler arquivo Excel: {path}")
+    errors = []
+
+    # Try openpyxl first for all Excel files
+    try:
+        logging.info("Tentando com openpyxl...")
+        result = pd.read_excel(path, engine="openpyxl")
+        logging.info("Sucesso com openpyxl")
+        return result
+    except ImportError as exc:
+        errors.append(f"openpyxl: dependencia ausente ({exc})")
+        logging.warning(f"Erro openpyxl ImportError: {exc}")
+    except Exception as exc:
+        errors.append(f"openpyxl: {exc}")
+        logging.warning(f"Erro openpyxl: {exc}")
+
+    # If openpyxl failed, try xlrd
+    try:
+        logging.info("Tentando com xlrd...")
+        result = pd.read_excel(path, engine="xlrd")
+        logging.info("Sucesso com xlrd")
+        return result
+    except ImportError as exc:
+        errors.append(f"xlrd: dependencia ausente ({exc})")
+        logging.warning(f"Erro xlrd ImportError: {exc}")
+    except Exception as exc:
+        errors.append(f"xlrd: {exc}")
+        logging.warning(f"Erro xlrd: {exc}")
+
+    error_msg = f"Não foi possível ler o Excel enviado após tentar openpyxl e xlrd. Tentativas: {' | '.join(errors)}"
+    logging.error(error_msg)
+    raise ValueError(error_msg)
 
 
 def _extract_pdf_text(path: Path) -> str:
@@ -167,7 +200,10 @@ def list_import_history(limit: int = 20) -> List[Dict]:
 
 
 def process_chefweb_upload(uploaded_file, empresa: str) -> Dict:
+    import logging
+    logging.info(f"Iniciando processamento de upload ChefWeb para empresa {empresa}, arquivo: {uploaded_file.name}")
     saved_path = save_uploaded_file(uploaded_file, empresa)
+    logging.info(f"Arquivo salvo em: {saved_path}")
     suffix = saved_path.suffix.lower()
     warnings = []
     extracted_text = ""
