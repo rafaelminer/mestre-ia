@@ -66,3 +66,24 @@ def test_analise_endpoint():
         assert 'insights' in response.json()
 
 
+def test_dashboard_endpoint():
+    with TestClient(app) as client:
+        response = client.get('/dashboard', params={'empresa': 'Japatê'})
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload['empresa'] == 'Japatê'
+        assert 'status_operacao' in payload
+        assert 'cards' in payload
+        assert isinstance(payload['cards'], list)
+        assert 'alertas' in payload
+        assert 'top_itens' in payload
+        assert 'snapshot' in payload
+        assert 'faturamento_total' in payload['snapshot']
+
+
+def test_dashboard_app_endpoint():
+    with TestClient(app) as client:
+        response = client.get('/dashboard/app')
+        assert response.status_code == 200
+        assert 'text/html' in response.headers.get('content-type', '')
+        assert 'Dashboard Operacional' in response.text

@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import Optional
 from services.vendas_service import listar_vendas, registrar_venda, total_vendas, vendas_por_item
@@ -17,6 +18,7 @@ import os
 from database.queries import get_external_cache
 from services.external_service import fetch_and_cache_impact
 from services.alert_service import check_and_notify_company, check_and_notify_all
+from modules.dashboard import indicadores_empresa
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -201,6 +203,146 @@ def api_analisar(empresa: Optional[str] = None):
     resultado = AIOperacional.analisar_dados(empresa)
     log_info(empresa or 'sistema', 'Análise IA API executada')
     return resultado
+
+
+@app.get('/dashboard')
+def api_dashboard(empresa: Optional[str] = None):
+    """Retorna um payload pronto para um dashboard operacional web/mobile."""
+    indicadores = indicadores_empresa(empresa)
+    faturamento_total = indicadores.get('faturamento_total') or 0.0
+    pedidos_periodo = indicadores.get('pedidos_periodo') or 0
+    ticket_medio = indicadores.get('ticket_medio') or 0.0
+    variacao_periodo = indicadores.get('variacao_periodo') or 0.0
+    estoque_baixo = indicadores.get('estoque_baixo') or []
+    vendas_por_item = indicadores.get('vendas_por_item') or []
+    horario_pico = indicadores.get('horario_pico')
+
+    status_operacao = 'estavel'
+    if variacao_periodo <= -12 or len(estoque_baixo) >= 5:
+        status_operacao = 'atencao'
+    if variacao_periodo <= -25 or len(estoque_baixo) >= 8:
+        status_operacao = 'critico'
+
+    cards = [
+        {'id': 'faturamento_total', 'label': 'Faturamento total', 'valor': faturamento_total, 'tipo': 'currency'},
+        {'id': 'pedidos_periodo', 'label': 'Pedidos (7 dias)', 'valor': pedidos_periodo, 'tipo': 'number'},
+        {'id': 'ticket_medio', 'label': 'Ticket médio', 'valor': ticket_medio, 'tipo': 'currency'},
+        {'id': 'variacao_periodo', 'label': 'Variação vs. semana anterior', 'valor': variacao_periodo, 'tipo': 'percent'},
+    ]
+
+    alertas = []
+    if estoque_baixo:
+        alertas.append({
+            'tipo': 'estoque',
+            'nivel': 'warning',
+            'mensagem': f'{len(estoque_baixo)} item(ns) abaixo do mínimo.',
+        })
+    if variacao_periodo < 0:
+        alertas.append({
+            'tipo': 'vendas',
+            'nivel': 'warning',
+            'mensagem': f'Faturamento da semana caiu {abs(variacao_periodo):.1f}% em relação ao período anterior.',
+        })
+
+    return {
+        'empresa': empresa or 'todas',
+        'status_operacao': status_operacao,
+        'cards': cards,
+        'alertas': alertas,
+        'top_itens': vendas_por_item[:5],
+        'horario_pico': horario_pico,
+        'snapshot': indicadores,
+    }
+
+
+@app.get('/dashboard/app', response_class=HTMLResponse)
+def api_dashboard_app():
+    """Página simples de dashboard que consome o endpoint JSON /dashboard."""
+    return """
+    <!doctype html>
+    <html lang="pt-BR">
+    <head>
+      <meta charset="UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <title>DOJO Dashboard</title>
+      <style>
+        body { margin: 0; font-family: Inter, Arial, sans-serif; background: #0f172a; color: #e2e8f0; }
+        .wrap { max-width: 1100px; margin: 0 auto; padding: 24px; }
+        .top { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 16px; }
+        .input { display: flex; gap: 8px; }
+        input, button { border-radius: 10px; border: 1px solid #334155; background: #0b1220; color: #e2e8f0; padding: 10px 12px; }
+        button { background: #2563eb; border: none; cursor: pointer; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 16px; }
+        .card { background: #111827; border: 1px solid #1f2937; border-radius: 14px; padding: 14px; }
+        .label { font-size: 12px; color: #93c5fd; text-transform: uppercase; letter-spacing: .04em; }
+        .value { font-size: 26px; font-weight: 700; margin-top: 6px; }
+        .badge { padding: 6px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+        .estavel { background: #14532d; }
+        .atencao { background: #7c2d12; }
+        .critico { background: #7f1d1d; }
+        ul { margin: 0; padding-left: 18px; }
+      </style>
+    </head>
+    <body>
+      <div class="wrap">
+        <div class="top">
+          <h1>Dashboard Operacional</h1>
+          <div class="input">
+            <input id="empresa" placeholder="Empresa (ex: Japatê)" />
+            <button onclick="carregar()">Atualizar</button>
+          </div>
+        </div>
+        <div id="status"></div>
+        <div id="cards" class="grid"></div>
+        <div class="grid">
+          <div class="card"><h3>Alertas</h3><ul id="alertas"></ul></div>
+          <div class="card"><h3>Top itens</h3><ul id="top"></ul></div>
+        </div>
+      </div>
+      <script>
+        const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+        function formatar(card) {
+          if (card.tipo === 'currency') return BRL.format(card.valor || 0);
+          if (card.tipo === 'percent') return `${(card.valor || 0).toFixed(1)}%`;
+          return `${card.valor || 0}`;
+        }
+        function li(texto) {
+          const el = document.createElement('li');
+          el.textContent = texto;
+          return el;
+        }
+        async function carregar() {
+          const empresa = document.getElementById('empresa').value.trim();
+          const qs = empresa ? `?empresa=${encodeURIComponent(empresa)}` : '';
+          const res = await fetch(`/dashboard${qs}`);
+          const data = await res.json();
+          const status = document.getElementById('status');
+          status.innerHTML = `<span class="badge ${data.status_operacao}">status: ${data.status_operacao}</span>`;
+
+          const cards = document.getElementById('cards');
+          cards.innerHTML = '';
+          (data.cards || []).forEach(card => {
+            const div = document.createElement('div');
+            div.className = 'card';
+            div.innerHTML = `<div class="label">${card.label}</div><div class="value">${formatar(card)}</div>`;
+            cards.appendChild(div);
+          });
+
+          const alertas = document.getElementById('alertas');
+          alertas.innerHTML = '';
+          if ((data.alertas || []).length === 0) alertas.appendChild(li('Sem alertas no momento.'));
+          (data.alertas || []).forEach(a => alertas.appendChild(li(a.mensagem)));
+
+          const top = document.getElementById('top');
+          top.innerHTML = '';
+          if ((data.top_itens || []).length === 0) top.appendChild(li('Sem itens no período.'));
+          (data.top_itens || []).forEach(i => top.appendChild(li(`${i.item}: ${i.quantidade}`)));
+        }
+        carregar();
+      </script>
+    </body>
+    </html>
+    """
 
 
 @app.get('/external/impact')
